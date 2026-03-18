@@ -1,0 +1,5 @@
+shell
+*.o
+*.out
+*.dSYM
+.DB_Store
