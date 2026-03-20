@@ -1,7 +1,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/_types/_pid_t.h>
 #include <unistd.h>
 #include <sys/wait.h>
 
