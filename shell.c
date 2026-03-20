@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/_types/_pid_t.h>
 #include <unistd.h>
 #include <sys/wait.h>
 
@@ -29,7 +30,7 @@ void append (History *self, char *tokens[64]) {
   self->history[self->len++] = strdup(buf);
 }
 
-
+int find_op(char *tokens[64], const char* op);
 int exec_cmd(char *tokens[64], char buffer[1024], History *history);
 
 int main() {
@@ -48,8 +49,8 @@ int main() {
         exit(1);
       case BUILTIN_OK:
         continue;
+      }
     }
-   }
   }
   for (int i = 0; i < history->len; i++) {
     free(history->history[i]);
@@ -69,6 +70,48 @@ int exec_cmd(char *tokens[64], char buffer[1024], History *history) {
   }
   tokens[count] = NULL;
 
+  int fork_index =  find_op(tokens, "|");
+  
+  if (fork_index > 0) {
+    tokens[fork_index] = NULL;
+    char **left = tokens;
+    char **right = tokens + fork_index + 1;
+
+    int fds[2];
+    pipe(fds);
+
+    pid_t process_id_1, process_id_2;
+
+    process_id_1 = fork();
+    if (process_id_1 == 0) {
+      dup2(fds[1], STDOUT_FILENO);
+      close(fds[0]);
+      close(fds[1]);
+      execvp(left[0], left);
+      exit(1);
+    } else {
+      process_id_2 = fork();
+      if (process_id_2 < 0) {
+        perror("fork failed");
+        return BUILTIN_ERROR;
+      }
+      
+      if (process_id_2 == 0) {
+        dup2(fds[0], STDIN_FILENO);
+        close(fds[0]);
+        close(fds[1]);
+        execvp(right[0], right);
+        exit(1);
+      }
+    }
+
+    close(fds[0]);
+    close(fds[1]);
+    waitpid(process_id_2, NULL, 0);
+    waitpid(process_id_1, NULL, 0);
+    return 0;
+  }
+  
   if (strcmp(tokens[0], "exit") == SUCCESS) {
     exit(BUILTIN_OK);
   } else if (strcmp(tokens[0], "cd") == SUCCESS) {
@@ -124,4 +167,15 @@ int exec_cmd(char *tokens[64], char buffer[1024], History *history) {
     }
 
     return 0;
+}
+
+int find_op(char *tokens[64], const char *op) {
+  int i, n = 0;
+  while (tokens[i] != NULL) {
+    if (strcmp(tokens[i], op) == 0) {
+      n = i;
+    }
+    i++;
+  }
+  return n;  
 }
