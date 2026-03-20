@@ -1,12 +1,17 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/fcntl.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 
 const int SUCCESS = 0;
 const int ERROR = -1;
 
+#define EXTERNAL_OK   5
+#define FORK_ERROR    4
+#define FILE_ERROR    3
 #define BUILTIN_ERROR 1
 #define BUILTIN_OK    0
 
@@ -16,7 +21,7 @@ typedef struct {
 } History;
 
 void append (History *self, char *tokens[64]) {
-  if (self->len > 64) { return; };
+  if (self->len >= 64) { return; };
 
   char buf[1024] = {0};
 
@@ -36,7 +41,7 @@ int main() {
   char *tokens[64];
   History *history = malloc(sizeof(*history));
 
-  while (2) {
+  while (1) {
   char buffer[1024];
 
   printf("\n$ ");
@@ -70,7 +75,6 @@ int exec_cmd(char *tokens[64], char buffer[1024], History *history) {
   tokens[count] = NULL;
 
   int fork_index =  find_op(tokens, "|");
-  
   if (fork_index > 0) {
     tokens[fork_index] = NULL;
     char **left = tokens;
@@ -92,7 +96,7 @@ int exec_cmd(char *tokens[64], char buffer[1024], History *history) {
       process_id_2 = fork();
       if (process_id_2 < 0) {
         perror("fork failed");
-        return BUILTIN_ERROR;
+        return FORK_ERROR;
       }
       
       if (process_id_2 == 0) {
@@ -130,10 +134,10 @@ int exec_cmd(char *tokens[64], char buffer[1024], History *history) {
         return BUILTIN_ERROR;
       } else {
         printf("%s\n", result);
+        append(history, tokens);
+        free(buf);
         return BUILTIN_OK;
       }
-      append(history, tokens);
-      free(buf);
     } else if (strcmp(tokens[0], "echo") == SUCCESS) {
       int i = 1;
       while (tokens[i] != NULL) {
@@ -150,14 +154,44 @@ int exec_cmd(char *tokens[64], char buffer[1024], History *history) {
     } else {
       pid_t pid = fork();
       if (pid == 0) {
-        if (execvp(tokens[0], tokens) == ERROR) {
-          fprintf(stderr, "%s: command not found\n", tokens[0]);
-          exit(BUILTIN_ERROR);
+        int r_index = find_op(tokens, ">");
+        if (r_index > 0) {
+          const char *file_name = tokens[r_index + 1];
+          tokens[r_index] = NULL;
+          tokens[r_index + 1] = NULL;
+          int fd = open(file_name, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+
+          if (fd == -1) {
+            perror("error opening file");
+            exit(FILE_ERROR);
+          }
+          
+          dup2(fd, STDOUT_FILENO);
+          close(fd);
         }
-      } else if (pid > 0){
+
+        int ir_index = find_op(tokens, "<");
+        if (ir_index > 0) {
+          const char *file_name = tokens[ir_index + 1];
+          tokens[ir_index] = NULL;
+          tokens[ir_index + 1] = NULL;
+
+          int fd = open(file_name, O_RDONLY, 0644);
+          if (fd == -1) {
+            perror("error opening file");
+            exit(FILE_ERROR);
+          }
+          
+          dup2(fd, STDIN_FILENO);
+          close(fd); 
+        }
+        
+        execvp(tokens[0], tokens);
+        exit(1);
+       } else if (pid > 0){
         waitpid(pid, NULL, 0);
         append(history, tokens);
-        return BUILTIN_OK;
+        return EXTERNAL_OK;
       } else {
         append(history, tokens);
         perror("fork failed\n");
@@ -169,7 +203,7 @@ int exec_cmd(char *tokens[64], char buffer[1024], History *history) {
 }
 
 int find_op(char *tokens[64], const char *op) {
-  int i, n = 0;
+  int i = 0, n = 0;
   while (tokens[i] != NULL) {
     if (strcmp(tokens[i], op) == 0) {
       n = i;
