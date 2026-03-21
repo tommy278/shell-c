@@ -19,7 +19,6 @@ gcc shell.c -o shell
 
 ## What I'd Add Next
 
-- `>>` append redirection
 - Persist history to `~/.shell_history` across sessions
 - `&&` and `||` chaining
 - Ctrl+C signal handling
