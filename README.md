@@ -19,6 +19,5 @@ gcc shell.c -o shell
 
 ## What I'd Add Next
 
-- Persist history to `~/.shell_history` across sessions
 - `&&` and `||` chaining
 - Ctrl+C signal handling
