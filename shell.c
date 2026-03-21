@@ -15,6 +15,10 @@ const int ERROR = -1;
 #define BUILTIN_ERROR 1
 #define BUILTIN_OK    0
 
+#define MAX_LINE_LENGTH 256
+
+static char path[256];
+
 typedef struct {
   int len;
   char *history[64];
@@ -31,15 +35,35 @@ void append (History *self, char *tokens[64]) {
       strncat(buf, " ", sizeof(buf) - strlen(buf) - 1);
     }
   }
-  self->history[self->len++] = strdup(buf);
+
+  FILE *fptr;
+  self->history[self->len] = strdup(buf);
+  fptr = fopen(path, "a");
+  fprintf(fptr, "%s\n", self->history[self->len]);
+  fclose(fptr);
+  self->len++;
 }
 
 int find_op(char *tokens[64], const char* op);
-int exec_cmd(char *tokens[64], char buffer[1024], History *history);
+int exec_cmd(char *tokens[64], char buffer[1024], History *history, FILE *fptr);
 
 int main() {
   char *tokens[64];
   History *history = malloc(sizeof(*history));
+
+  FILE *fptr;
+  char line[MAX_LINE_LENGTH];
+
+  snprintf(path, sizeof(path), "%s/.shell_history", getenv("HOME"));
+  fptr = fopen(path, "r");
+
+  if (fptr) { 
+    while (fgets(line, MAX_LINE_LENGTH, fptr) != NULL) {
+      line[strcspn(line, "\n")] = 0;
+      history->history[history->len++] = strdup(line);
+    }
+    fclose(fptr);
+  }
 
   while (1) {
   char buffer[1024];
@@ -47,11 +71,13 @@ int main() {
   printf("\n$ ");
 
   if (fgets(buffer, sizeof(buffer), stdin) != NULL) {
-    int result = exec_cmd(tokens, buffer, history);
+    int result = exec_cmd(tokens, buffer, history, fptr);
     switch(result) {
       case BUILTIN_ERROR:
         exit(1);
       case BUILTIN_OK:
+        continue;
+      case EXTERNAL_OK:
         continue;
       }
     }
@@ -62,7 +88,7 @@ int main() {
   return 0;
 }
 
-int exec_cmd(char *tokens[64], char buffer[1024], History *history) {
+int exec_cmd(char *tokens[64], char buffer[1024], History *history, FILE *fptr) {
   char *token = strtok(buffer, " ");
 
   int count = 0;
@@ -76,6 +102,7 @@ int exec_cmd(char *tokens[64], char buffer[1024], History *history) {
 
   int fork_index =  find_op(tokens, "|");
   if (fork_index > 0) {
+    append(history, tokens);
     tokens[fork_index] = NULL;
     char **left = tokens;
     char **right = tokens + fork_index + 1;
@@ -95,7 +122,7 @@ int exec_cmd(char *tokens[64], char buffer[1024], History *history) {
     } else {
       process_id_2 = fork();
       if (process_id_2 < 0) {
-        perror("fork failed");
+        fprintf(stderr, "fork failed\n");
         return FORK_ERROR;
       }
       
@@ -125,7 +152,7 @@ int exec_cmd(char *tokens[64], char buffer[1024], History *history) {
         perror("Invalid directory\n");
         return BUILTIN_ERROR;
       }
-      append(history,tokens);
+      append(history, tokens);
     } else if (strcmp(tokens[0], "pwd") == SUCCESS) {
       char *buf = malloc(512);
       char *result = getcwd(buf, 512);
@@ -139,9 +166,11 @@ int exec_cmd(char *tokens[64], char buffer[1024], History *history) {
         return BUILTIN_OK;
       }
     } else if(strcmp(tokens[0], "history") == 0) {
+      printf("\n");
       for (int i = 0; i < history->len; i++) {
         printf("%s\n", history->history[i]);
       }
+      printf("\n");
       append(history, tokens);
       return BUILTIN_OK;
     } else {
@@ -193,7 +222,7 @@ int exec_cmd(char *tokens[64], char buffer[1024], History *history) {
           dup2(fd, STDIN_FILENO);
           close(fd); 
         }
-        
+
         execvp(tokens[0], tokens);
         exit(1);
        } else if (pid > 0){
@@ -218,12 +247,12 @@ int exec_cmd(char *tokens[64], char buffer[1024], History *history) {
 }
 
 int find_op(char *tokens[64], const char *op) {
-  int i = 0, n = 0;
+  int i = 0, idx = 0;
   while (tokens[i] != NULL) {
     if (strcmp(tokens[i], op) == 0) {
-      n = i;
+      idx = i;
     }
     i++;
   }
-  return n;  
+  return idx;  
 }
